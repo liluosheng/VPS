@@ -2200,209 +2200,1066 @@ ssl_menu() {
     done
 }
 
-# ============== 站点管理 ==============
-# 创建站点（基于Nginx/LDNMP）
+# ============== 站点管理模块 ==============
+# 创建站点（基于Nginx/LDNMP环境）
 create_site() {
-    root_use
+    root_use  # 权限检查（预设函数）
+    # 1. 获取用户输入（域名、网站根目录）
     read -e -p "请输入站点域名（如 example.com）: " yuming
     read -e -p "请输入网站根目录（默认 /var/www/html/$yuming）: " webroot
-    webroot=${webroot:-"/var/www/html/$yuming"}
-    mkdir -p $webroot
-    chmod -R 755 $webroot
-    echo "<h1>Site $yuming created successfully</h1>" > $webroot/index.html
+    webroot=${webroot:-"/var/www/html/$yuming"}  # 默认值处理
 
-    # 检测Nginx配置目录
+    # 2. 创建根目录并初始化首页
+    mkdir -p "$webroot"
+    chmod -R 755 "$webroot"
+    echo "<h1>Site $yuming created successfully</h1>" > "$webroot/index.html"
+
+    # 3. 检测Nginx配置目录（适配原生Nginx/LDNMP）
     local nginx_conf_dir="/etc/nginx/conf.d"
     if [ -d "/opt/ldnmp/nginx/conf" ]; then
         nginx_conf_dir="/opt/ldnmp/nginx/conf"
     fi
 
-    # 创建基础Nginx配置
-    cat > "$nginx_conf_dir/$yuming.conf" << EOFserver {listen 80;server_name $yuming;root $webroot;index index.php index.html index.htm;access_log /var/log/nginx/\(yuming-access.log;
-    error_log /var/log/nginx/\)yuming-error.log;location / {try_files $uri $uri/ /index.php?$query_string;}location ~ .php$ {fastcgi_pass php:9000; # LDNMP 环境使用fastcgi_pass 127.0.0.1:9000; # 非容器环境使用fastcgi_index index.php;fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;include fastcgi_params;}}EOF重启 Nginxif [ -f "/opt/ldnmp/docker-compose.yml" ]; thencd /opt/ldnmp && sudo docker-compose restart nginxelserestart nginxfiecho -e "${gl_lv}站点 \(yuming 创建完成！\){gl_bai}"echo "网站根目录: $webroot"echo " 配置文件: \(nginx_conf_dir/\)yuming.conf"echo " 访问地址: http://\(yuming"
-    send_stats "创建站点:\)yuming"}站点管理菜单site_menu() {while true; doclearecho -e "\({gl_XLtool}====== 站点管理 ======\){gl_bai}"send_stats "进入站点管理"检测 Nginx 配置目录local nginx_conf_dir="/etc/nginx/conf.d"if [ -d "/opt/ldnmp/nginx/conf" ]; thennginx_conf_dir="/opt/ldnmp/nginx/conf"fiecho -e "\({gl_huang}当前站点列表:\){gl_bai}"if [ -d "$nginx_conf_dir" ]; thenls -l $nginx_conf_dir | grep -v default | grep ".conf" | awk -F '/' '{print $NF}' | sed's/.conf//g'elseecho "未检测到 Nginx 配置目录"fiecho -e "\n\({gl_XLtool}操作选项\){gl_bai}"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "1. 创建新站点（自动生成 Nginx 配置）"echo "2. 启用 HTTPS（自动部署 SSL 证书）"echo "3. 编辑站点配置"echo "4. 删除站点"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "5. 查看站点访问日志"echo "6. 清空站点日志"echo "7. 设置反向代理"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "0. 返回上一级选单"echo -e "\({gl_XLtool}------------------------\){gl_bai}"read -e -p "请输入你的选择:" sub_choicecase \(sub_choice in             1)
-                create_site
-                ;;             2)
+    # 4. 生成Nginx基础配置文件
+    cat > "$nginx_conf_dir/$yuming.conf" << EOF
+server {
+    listen 80;
+    server_name $yuming;
+    root $webroot;
+    index index.php index.html index.htm;
+
+    # 日志配置
+    access_log /var/log/nginx/$yuming-access.log;
+    error_log /var/log/nginx/$yuming-error.log;
+
+    # 静态资源处理
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    # PHP解析配置（适配LDNMP容器/原生环境）
+    location ~ \.php$ {
+        fastcgi_pass php:9000;        # LDNMP容器环境
+        # fastcgi_pass 127.0.0.1:9000; # 原生非容器环境（按需注释切换）
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+    }
+}
+EOF
+
+    # 5. 重启Nginx服务
+    if [ -f "/opt/ldnmp/docker-compose.yml" ]; then
+        # LDNMP环境（docker-compose重启）
+        cd /opt/ldnmp && sudo docker-compose restart nginx
+    else
+        # 原生环境（系统服务重启）
+        if command -v systemctl &>/dev/null; then
+            systemctl restart nginx
+        else
+            service nginx restart
+        fi
+    fi
+
+    # 6. 输出结果与统计
+    echo -e "${gl_lv}站点 $yuming 创建完成！${gl_bai}"
+    echo "网站根目录: $webroot"
+    echo "配置文件: $nginx_conf_dir/$yuming.conf"
+    echo "访问地址: http://$yuming"
+    send_stats "创建站点:$yuming"  # 操作统计（预设函数）
+}
+
+# 站点管理主菜单
+site_menu() {
+    while true; do
+        clear
+        echo -e "${gl_XLtool}====== 站点管理 ======${gl_bai}"
+        send_stats "进入站点管理"  # 操作统计
+
+        # 检测Nginx配置目录
+        local nginx_conf_dir="/etc/nginx/conf.d"
+        if [ -d "/opt/ldnmp/nginx/conf" ]; then
+            nginx_conf_dir="/opt/ldnmp/nginx/conf"
+        fi
+
+        # 显示当前站点列表
+        echo -e "${gl_huang}当前站点列表:${gl_bai}"
+        if [ -d "$nginx_conf_dir" ]; then
+            # 过滤默认配置，仅显示自定义站点
+            ls -l "$nginx_conf_dir" | grep -v "default" | grep ".conf" | awk -F '/' '{print $NF}' | sed 's/.conf//g'
+        else
+            echo "未检测到Nginx配置目录"
+        fi
+
+        # 显示操作选项
+        echo -e "\n${gl_XLtool}操作选项${gl_bai}"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "1. 创建新站点（自动生成Nginx配置）"
+        echo "2. 启用HTTPS（自动部署SSL证书）"
+        echo "3. 编辑站点配置"
+        echo "4. 删除站点"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "5. 查看站点访问日志"
+        echo "6. 清空站点日志"
+        echo "7. 设置反向代理"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "0. 返回上一级菜单"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+
+        # 处理用户选择
+        read -e -p "请输入你的选择: " sub_choice
+        case $sub_choice in
+            1)
+                create_site  # 调用创建站点函数
+                ;;
+            2)
+                # 启用HTTPS（依赖预设的deploy_ssl_nginx函数）
                 read -e -p "请输入要启用HTTPS的域名: " yuming
-                if [ -f "\)nginx_conf_dir/\(yuming.conf" ]; then
-                    deploy_ssl_nginx
+                if [ -f "$nginx_conf_dir/$yuming.conf" ]; then
+                    deploy_ssl_nginx  # 部署SSL证书（预设函数）
                 else
-                    echo -e "\){gl_hong} 未找到 \(yuming 的站点配置，请先创建站点（选择1）\){gl_bai}"fi;;3)read -e -p "请输入要编辑的域名:" yumingif [ -f "\(nginx_conf_dir/\)yuming.conf" ]; thennano "\(nginx_conf_dir/\)yuming.conf"重启 Nginxif [ -f "/opt/ldnmp/docker-compose.yml" ]; thencd /opt/ldnmp && sudo docker-compose restart nginxelserestart nginxfiecho -e "\({gl_lv}\)yuming 配置已更新\({gl_bai}"
-                    send_stats "编辑站点配置:\)yuming"elseecho -e "${gl_hong}未找到 \(yuming 的站点配置\){gl_bai}"fi;; 4)read -e -p "请输入要删除的域名: " yumingif [ -f "\(nginx\_conf\_dir/\)yuming.conf" ]; thenread -e -p "\((echo -e "\){gl_hong}警告: ${gl_bai} 确定删除 \(yuming 站点吗？(Y/N): ")" confirm
-                    if [ "\)confirm" = "Y" ] || [ "$confirm" = "y" ]; then删除配置文件rm -f "\(nginx_conf_dir/\)yuming.conf"删除网站目录local webroot="/var/www/html/\(yuming"
-                        if [ -d "\)webroot" ]; thenread -e -p " 是否同时删除网站文件（\(webroot）？(Y/N): " del_files
-                            if [ "\)del_files" = "Y" ] || [ "\(del_files" = "y" ]; then
-                                rm -rf "\)webroot"echo -e "\({gl_lv}网站文件已删除\){gl_bai}"fifi重启 Nginxif [ -f "/opt/ldnmp/docker-compose.yml" ]; thencd /opt/ldnmp && sudo docker-compose restart nginxelserestart nginxfiecho -e "\({gl_lv}\)yuming 站点已删除\({gl_bai}"
-                        send_stats "删除站点:\)yuming"elseecho -e "\({gl_huang}已取消删除操作\){gl_bai}"fielseecho -e "${gl_hong}未找到 \(yuming 的站点配置\){gl_bai}"fi;; 5)read -e -p "请输入要查看日志的域名: " yuminglocal log_file="/var/log/nginx/\(yuming-access.log"
-if \[ -f "\)log_file" ]; thenread -e -p "显示行数(默认100): " lineslines=${lines:-100}tail -n \(lines "\)log_file"send_stats " 查看站点日志:\(yuming"
-                else
-                    echo -e "\){gl_hong} 未找到 \(yuming 的日志文件\){gl_bai}"fi;;6)read -e -p "请输入要清空日志的域名:" yuminglocal access_log="/var/log/nginx/\(yuming-access.log"
-                local error_log="/var/log/nginx/\)yuming-error.log"if [ -f "$access_log" ]; then"\(access_log"
-"\)error_log"echo -e "\({gl_lv}\)yuming 的日志已清空\({gl_bai}"
-                    send_stats "清空站点日志:\)yuming"elseecho -e "${gl_hong}未找到 $yuming 的日志文件 ${gl_bai}"fi;;read -e -p "请输入代理域名:" yumingread -e -p " 请输入目标地址（如 http://127.0.0.1:8080）: " targetif [ -f "\(nginx_conf_dir/\)yuming.conf" ]; thenread -e -p "是否覆盖现有配置？(Y/N):" overwriteif [ "\(overwrite" != "Y" ] && [ "\)overwrite" != "y" ]; thenecho -e "\({gl_huang}已取消操作\){gl_bai}"continuefifi创建反向代理配置cat > "\(nginx_conf_dir/\)yuming.conf" << EOFserver {listen 80;server_name $yuming;location / {proxy_pass $target;proxy_set_header Host $host;proxy_set_header X-Real-IP $remote_addr;proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;proxy_set_header X-Forwarded-Proto $scheme;}}EOF重启 Nginxif [ -f "/opt/ldnmp/docker-compose.yml" ]; thencd /opt/ldnmp && sudo docker-compose restart nginxelserestart nginxfiecho -e "\({gl_lv}反向代理已设置：\)yuming -> target{gl_bai}"send_stats " 设置反向代理:\(yuming->\)target";;0)break;;*)echo -e "\({gl_hong}❌ 无效选择，请重新输入\){gl_bai}";;esacbreak_enddone}============== 服务器监控相关 ==============安装系统监控工具install_monitor() {root_useinstall_dependencycheck_disk_space 10if command -v goaccess &>/dev/null && command -v htop &>/dev/null; thenecho -e "\({gl_huang}监控工具已安装，跳过安装步骤\){gl_bai}"returnfiecho -e "\({gl_huang}正在安装监控工具...\){gl_bai}"install htop iftop iotop nload goaccess net-toolsecho -e "\({gl_lv}监控工具安装完成\){gl_bai}"send_stats "安装系统监控工具"}实时系统监控realtime_monitor() {install_monitorwhile true; doclearecho -e "\({gl_XLtool}====== 实时系统监控 ======\){gl_bai}"send_stats "进入实时系统监控"echo "1. CPU / 内存 / 进程监控（htop）"echo "2. 网络流量监控（iftop）"echo "3. 磁盘 IO 监控（iotop）"echo "4. 带宽监控（nload）"echo "5. Web 访问日志分析（goaccess）"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "0. 返回上一级选单"echo -e "\({gl_XLtool}------------------------\){gl_bai}"read -e -p "请输入你的选择:" sub_choicecase $sub_choice in1)htopsend_stats "使用 htop 监控";;2)iftopsend_stats "使用 iftop 监控";;3)iotopsend_stats "使用 iotop 监控";;4)nloadsend_stats "使用 nload 监控";;5)local log_file="/var/log/nginx/access.log"if [-f "/opt/ldnmp/logs/nginx/access.log"]; thenlog_file="/opt/ldnmp/logs/nginx/access.log"fiif [ -f "\(log_file" ]; then
-                    goaccess "\)log_file"send_stats "使用 goaccess 分析日志"elseecho -e "\({gl_hong}未找到Nginx访问日志，请先安装Nginx或LDNMP\){gl_bai}"fi;;0)break;;*)echo -e "\({gl_hong}❌ 无效选择，请重新输入\){gl_bai}";;esacbreak_enddone}服务器信息查看server_info() {clearecho -e "\({gl_XLtool}====== 服务器信息 ======\){gl_bai}"send_stats "查看服务器信息"系统信息echo -e "\({gl_huang}系统信息:\){gl_bai}"if [ -f /etc/os-release ]; then. /etc/os-releaseecho " 发行版: $PRETTY_NAME"fiecho "内核版本: $(uname -r)"echo " 架构: $(uname -m)"echo "主机名: $(hostname)"echo "当前时间: $(date)"IP 信息echo -e "\n\({gl_huang}网络信息:\){gl_bai}"echo " 公网 IPv4: $(curl -s ipinfo.io/ip)"echo "公网IPv6: $(curl -s --max-time 1 https://v6.ipinfo.io/ip || echo "未配置")"echo " 内网 IP: $(hostname -I | awk '{print $1}')"硬件信息echo -e "\n\({gl_huang}硬件信息:\){gl_bai}"echo "CPU: $(grep -c ^processor /proc/cpuinfo) 核心 $(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | sed -e's/^ *//')"echo " 内存：总 $(free -h | awk '/Mem:/ {print $2}')，已用 $(free -h | awk '/Mem:/ {print $3}')，空闲 $(free -h | awk '/Mem:/ {print $4}')"echo "Swap: 总 $(free -h | awk '/Swap:/ {print $2}')，已用 $(free -h | awk '/Swap:/ {print $3}')，空闲 $(free -h | awk '/Swap:/ {print $4}')"磁盘信息echo -e "\n\({gl_huang}磁盘信息:\){gl_bai}"df -h | grep -v tmpfs | grep -v loop负载信息echo -e "\n\({gl_huang}系统负载:\){gl_bai}"uptime服务状态echo -e "\n\({gl_huang}关键服务状态:\){gl_bai}"for service in docker nginx mysql sshd; doif command -v systemctl &>/dev/null; thenstatus=$(/bin/systemctl is-active \(service 2>/dev/null || echo "未安装")
-elif command -v service &>/dev/null; then
-status=\)(service \(service status 2>/dev/null | grep -q running && echo "运行中" || echo "未运行 / 未安装")
-else
-status="未知"
-fi
-echo "\)service: $status"donebreak_end}监控与信息菜单monitor_menu() {while true; doclearecho -e "\({gl_XLtool}====== 服务器监控与信息 ======\){gl_bai}"send_stats "进入服务器监控与信息"echo "1. 查看服务器详细信息"echo "2. 实时系统监控（CPU / 内存 / 网络等）"echo "3. 安装 / 更新监控工具"echo "4. 查看系统负载历史（最近 24 小时）"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "0. 返回主菜单"echo -e "\({gl_XLtool}------------------------\){gl_bai}"read -e -p "请输入你的选择:" choicecase \(choice in             1)
-                server_info
-                ;;             2)
-                realtime_monitor
-                ;;             3)
-                install_monitor
-                ;;             4)
-                if command -v sar &>/dev/null; then
-                    sar -A | less
-                else
-                    echo -e "\){gl_huang} 正在安装 sysstat（包含 sar 工具）...\({gl_bai}"
-                    install sysstat
-                    echo -e "\){gl_lv} 安装完成，请 24 小时后查看历史数据\({gl_bai}"
+                    echo -e "${gl_hong}未找到 $yuming 的站点配置，请先创建站点（选择1）${gl_bai}"
                 fi
-                send_stats "查看系统负载历史"
-                ;;             0)
+                ;;
+            3)
+                # 编辑站点配置
+                read -e -p "请输入要编辑的域名: " yuming
+                if [ -f "$nginx_conf_dir/$yuming.conf" ]; then
+                    nano "$nginx_conf_dir/$yuming.conf"  # 使用nano编辑（可替换为vim）
+                    # 重启Nginx生效
+                    if [ -f "/opt/ldnmp/docker-compose.yml" ]; then
+                        cd /opt/ldnmp && sudo docker-compose restart nginx
+                    else
+                        if command -v systemctl &>/dev/null; then
+                            systemctl restart nginx
+                        else
+                            service nginx restart
+                        fi
+                    fi
+                    echo -e "${gl_lv}$yuming 配置已更新${gl_bai}"
+                    send_stats "编辑站点配置:$yuming"
+                else
+                    echo -e "${gl_hong}未找到 $yuming 的站点配置${gl_bai}"
+                fi
+                ;;
+            4)
+                # 删除站点
+                read -e -p "请输入要删除的域名: " yuming
+                if [ -f "$nginx_conf_dir/$yuming.conf" ]; then
+                    # 二次确认（防止误删）
+                    read -e -p "$(echo -e "${gl_hong}警告: ${gl_bai}确定删除 $yuming 站点吗？(Y/N): ")" confirm
+                    if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
+                        # 删除Nginx配置文件
+                        rm -f "$nginx_conf_dir/$yuming.conf"
+                        # 可选删除网站根目录
+                        local webroot="/var/www/html/$yuming"
+                        if [ -d "$webroot" ]; then
+                            read -e -p "是否同时删除网站文件（$webroot）？(Y/N): " del_files
+                            if [ "$del_files" = "Y" ] || [ "$del_files" = "y" ]; then
+                                rm -rf "$webroot"
+                                echo -e "${gl_lv}网站文件已删除${gl_bai}"
+                            fi
+                        fi
+                        # 重启Nginx生效
+                        if [ -f "/opt/ldnmp/docker-compose.yml" ]; then
+                            cd /opt/ldnmp && sudo docker-compose restart nginx
+                        else
+                            if command -v systemctl &>/dev/null; then
+                                systemctl restart nginx
+                            else
+                                service nginx restart
+                            fi
+                        fi
+                        echo -e "${gl_lv}$yuming 站点已删除${gl_bai}"
+                        send_stats "删除站点:$yuming"
+                    else
+                        echo -e "${gl_huang}已取消删除操作${gl_bai}"
+                    fi
+                else
+                    echo -e "${gl_hong}未找到 $yuming 的站点配置${gl_bai}"
+                fi
+                ;;
+            5)
+                # 查看站点访问日志
+                read -e -p "请输入要查看日志的域名: " yuming
+                local log_file="/var/log/nginx/$yuming-access.log"
+                if [ -f "$log_file" ]; then
+                    read -e -p "显示行数(默认100): " lines
+                    lines=${lines:-100}  # 默认显示100行
+                    tail -n "$lines" "$log_file"
+                    send_stats "查看站点日志:$yuming"
+                else
+                    echo -e "${gl_hong}未找到 $yuming 的日志文件${gl_bai}"
+                fi
+                ;;
+            6)
+                # 清空站点日志
+                read -e -p "请输入要清空日志的域名: " yuming
+                local access_log="/var/log/nginx/$yuming-access.log"
+                local error_log="/var/log/nginx/$yuming-error.log"
+                if [ -f "$access_log" ] || [ -f "$error_log" ]; then
+                    # 清空日志（保留文件句柄，避免服务异常）
+                    truncate -s 0 "$access_log" "$error_log"
+                    echo -e "${gl_lv}$yuming 的日志已清空${gl_bai}"
+                    send_stats "清空站点日志:$yuming"
+                else
+                    echo -e "${gl_hong}未找到 $yuming 的日志文件${gl_bai}"
+                fi
+                ;;
+            7)
+                # 设置反向代理
+                read -e -p "请输入代理域名: " yuming
+                read -e -p "请输入目标地址（如 http://127.0.0.1:8080）: " target
+                # 检查配置文件是否存在（存在则询问覆盖）
+                if [ -f "$nginx_conf_dir/$yuming.conf" ]; then
+                    read -e -p "是否覆盖现有配置？(Y/N): " overwrite
+                    if [ "$overwrite" != "Y" ] && [ "$overwrite" != "y" ]; then
+                        echo -e "${gl_huang}已取消操作${gl_bai}"
+                        continue
+                    fi
+                fi
+                # 生成反向代理配置
+                cat > "$nginx_conf_dir/$yuming.conf" << EOF
+server {
+    listen 80;
+    server_name $yuming;
+
+    location / {
+        proxy_pass $target;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+                # 重启Nginx生效
+                if [ -f "/opt/ldnmp/docker-compose.yml" ]; then
+                    cd /opt/ldnmp && sudo docker-compose restart nginx
+                else
+                    if command -v systemctl &>/dev/null; then
+                        systemctl restart nginx
+                    else
+                        service nginx restart
+                    fi
+                fi
+                echo -e "${gl_lv}反向代理已设置：$yuming -> $target${gl_bai}"
+                send_stats "设置反向代理:$yuming->$target"
+                ;;
+            0)
+                # 返回上一级菜单
                 break
                 ;;
             *)
-                echo -e "\){gl_hong}❌ 无效选择，请重新输入 ${gl_bai}";;esacbreak_enddone}============== Fail2ban 防暴力破解 ==============安装 Fail2baninstall_fail2ban() {root_useinstall_dependencyif command -v fail2ban-client &>/dev/null; thenecho -e "\({gl_huang}Fail2ban已安装，跳过安装步骤\){gl_bai}"returnfiecho -e "\({gl_huang}正在安装Fail2ban...\){gl_bai}"install fail2banenable fail2banstart fail2banecho -e "\({gl_lv}Fail2ban安装完成\){gl_bai}"send_stats "安装 Fail2ban"}配置 Fail2ban 规则configure_fail2ban() {root_useinstall_fail2ban创建自定义配置cat > /etc/fail2ban/jail.local << 'EOF'[DEFAULT]ignoreip = 127.0.0.1/8bantime = 86400 # 封禁 24 小时findtime = 3600 # 1 小时内maxretry = 5 # 5 次失败尝试[sshd]enabled = trueport = sshlogpath = %(sshd_log)s[nginx-http-auth]enabled = trueport = http,httpslogpath = /var/log/nginx/error.logEOFLDNMP 环境日志路径适配if [ -d "/opt/ldnmp/logs/nginx" ]; thensed -i "s|/var/log/nginx/error.log|/opt/ldnmp/logs/nginx/error.log|g" /etc/fail2ban/jail.localfirestart fail2banecho -e "\({gl_lv}Fail2ban规则配置完成\){gl_bai}"send_stats "配置 Fail2ban 规则"}Fail2ban 管理菜单fail2ban_menu() {while true; doclearecho -e "\({gl_XLtool}====== Fail2ban 防暴力破解 ======\){gl_bai}"send_stats "进入 Fail2ban 管理"local status="未安装"if command -v fail2ban-client &>/dev/null; thenstatus=" 已安装（运行中: $(fail2ban-client status | grep "Number of jail" | awk '{print \(4}') 个规则）"
-fi
-echo -e "\){gl_huang}当前状态: $status${gl_bai}"if command -v fail2ban-client &>/dev/null; thenecho -e "\n\({gl_huang}已启用的规则:\){gl_bai}"fail2ban-client status | grep "Jail list" | awk -F': ' '{print $2}'fiecho -e "\n\({gl_XLtool}操作选项\){gl_bai}"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "1. 安装 Fail2ban"echo "2. 配置默认规则（SSH+Nginx）"echo "3. 查看被封禁的 IP"echo "4. 解封指定 IP"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "5. 启动 Fail2ban 服务"echo "6. 停止 Fail2ban 服务"echo "7. 重启 Fail2ban 服务"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "0. 返回上一级选单"echo -e "\({gl_XLtool}------------------------\){gl_bai}"read -e -p "请输入你的选择:" sub_choicecase \(sub_choice in             1)
-                install_fail2ban
-                ;;             2)
-                configure_fail2ban
-                ;;             3)
+                # 无效选择提示
+                echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
+                ;;
+        esac
+        break_end  # 暂停查看结果（预设函数，如 read -p "按回车继续..."）
+    done
+}
+
+
+# ============== 服务器监控模块 ==============
+# 安装系统监控工具（htop/iftop/iotop等）
+install_monitor() {
+    root_use  # 权限检查
+    install_dependency  # 安装依赖（预设函数）
+    check_disk_space 10  # 检查磁盘空间（至少10MB，预设函数）
+
+    # 检查工具是否已安装
+    if command -v goaccess &>/dev/null && command -v htop &>/dev/null; then
+        echo -e "${gl_huang}监控工具已安装，跳过安装步骤${gl_bai}"
+        return
+    fi
+
+    # 安装工具（适配不同包管理器）
+    echo -e "${gl_huang}正在安装监控工具...${gl_bai}"
+    if command -v apt &>/dev/null; then
+        apt install -y htop iftop iotop nload goaccess net-tools
+    elif command -v yum &>/dev/null; then
+        yum install -y htop iftop iotop nload goaccess net-tools
+    elif command -v dnf &>/dev/null; then
+        dnf install -y htop iftop iotop nload goaccess net-tools
+    elif command -v apk &>/dev/null; then
+        apk add htop iftop iotop nload goaccess net-tools
+    else
+        echo -e "${gl_hong}不支持的包管理器，无法安装监控工具${gl_bai}"
+        return
+    fi
+
+    echo -e "${gl_lv}监控工具安装完成${gl_bai}"
+    send_stats "安装系统监控工具"
+}
+
+# 实时系统监控（CPU/内存/网络等）
+realtime_monitor() {
+    install_monitor  # 确保工具已安装
+    while true; do
+        clear
+        echo -e "${gl_XLtool}====== 实时系统监控 ======${gl_bai}"
+        send_stats "进入实时系统监控"
+
+        # 显示监控选项
+        echo "1. CPU / 内存 / 进程监控（htop）"
+        echo "2. 网络流量监控（iftop）"
+        echo "3. 磁盘 IO 监控（iotop）"
+        echo "4. 带宽监控（nload）"
+        echo "5. Web 访问日志分析（goaccess）"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "0. 返回上一级菜单"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+
+        # 处理用户选择
+        read -e -p "请输入你的选择: " sub_choice
+        case $sub_choice in
+            1)
+                htop  # CPU/内存监控
+                send_stats "使用 htop 监控"
+                ;;
+            2)
+                iftop  # 网络流量监控
+                send_stats "使用 iftop 监控"
+                ;;
+            3)
+                iotop  # 磁盘IO监控
+                send_stats "使用 iotop 监控"
+                ;;
+            4)
+                nload  # 带宽监控
+                send_stats "使用 nload 监控"
+                ;;
+            5)
+                # Web日志分析（适配原生/LDNMP环境）
+                local log_file="/var/log/nginx/access.log"
+                if [ -f "/opt/ldnmp/logs/nginx/access.log" ]; then
+                    log_file="/opt/ldnmp/logs/nginx/access.log"
+                fi
+                if [ -f "$log_file" ]; then
+                    goaccess "$log_file"  # 交互式日志分析
+                    send_stats "使用 goaccess 分析日志"
+                else
+                    echo -e "${gl_hong}未找到Nginx访问日志，请先安装Nginx或LDNMP${gl_bai}"
+                fi
+                ;;
+            0)
+                break  # 返回上一级
+                ;;
+            *)
+                echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
+                ;;
+        esac
+        break_end  # 暂停查看结果
+    done
+}
+
+# 查看服务器详细信息
+server_info() {
+    clear
+    echo -e "${gl_XLtool}====== 服务器信息 ======${gl_bai}"
+    send_stats "查看服务器信息"
+
+    # 1. 系统基础信息
+    echo -e "${gl_huang}系统信息:${gl_bai}"
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "  发行版: $PRETTY_NAME"
+    fi
+    echo "  内核版本: $(uname -r)"
+    echo "  架构: $(uname -m)"
+    echo "  主机名: $(hostname)"
+    echo "  当前时间: $(date)"
+
+    # 2. 网络信息（公网/内网IP）
+    echo -e "\n${gl_huang}网络信息:${gl_bai}"
+    echo "  公网 IPv4: $(curl -s --max-time 2 ipinfo.io/ip || echo "获取失败")"
+    echo "  公网 IPv6: $(curl -s --max-time 2 https://v6.ipinfo.io/ip || echo "未配置/获取失败")"
+    echo "  内网 IP: $(hostname -I | awk '{print $1}' || echo "未配置")"
+
+    # 3. 硬件信息（CPU/内存）
+    echo -e "\n${gl_huang}硬件信息:${gl_bai}"
+    local cpu_core=$(grep -c ^processor /proc/cpuinfo)
+    local cpu_model=$(grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | sed -e 's/^ *//')
+    echo "  CPU: $cpu_core 核心 $cpu_model"
+    echo "  内存：总 $(free -h | awk '/Mem:/ {print $2}')，已用 $(free -h | awk '/Mem:/ {print $3}')，空闲 $(free -h | awk '/Mem:/ {print $4}')"
+    echo "  Swap: 总 $(free -h | awk '/Swap:/ {print $2}')，已用 $(free -h | awk '/Swap:/ {print $3}')，空闲 $(free -h | awk '/Swap:/ {print $4}')"
+
+    # 4. 磁盘信息
+    echo -e "\n${gl_huang}磁盘信息:${gl_bai}"
+    df -h | grep -v tmpfs | grep -v loop  # 过滤临时文件系统
+
+    # 5. 系统负载
+    echo -e "\n${gl_huang}系统负载:${gl_bai}"
+    uptime  # 显示1/5/15分钟负载
+
+    # 6. 关键服务状态
+    echo -e "\n${gl_huang}关键服务状态:${gl_bai}"
+    for service in docker nginx mysql sshd; do
+        if command -v systemctl &>/dev/null; then
+            status=$(systemctl is-active "$service" 2>/dev/null || echo "未安装")
+        elif command -v service &>/dev/null; then
+            status=$(service "$service" status 2>/dev/null | grep -q "running" && echo "运行中" || echo "未运行/未安装")
+        else
+            status="未知"
+        fi
+        echo "  $service: $status"
+    done
+
+    break_end  # 暂停查看结果
+}
+
+# 监控与信息主菜单
+monitor_menu() {
+    while true; do
+        clear
+        echo -e "${gl_XLtool}====== 服务器监控与信息 ======${gl_bai}"
+        send_stats "进入服务器监控与信息"
+
+        # 显示操作选项
+        echo "1. 查看服务器详细信息"
+        echo "2. 实时系统监控（CPU / 内存 / 网络等）"
+        echo "3. 安装 / 更新监控工具"
+        echo "4. 查看系统负载历史（最近24小时）"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "0. 返回主菜单"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+
+        # 处理用户选择
+        read -e -p "请输入你的选择: " choice
+        case $choice in
+            1)
+                server_info  # 查看服务器信息
+                ;;
+            2)
+                realtime_monitor  # 实时监控
+                ;;
+            3)
+                install_monitor  # 安装监控工具
+                ;;
+            4)
+                # 查看系统负载历史（sar工具）
+                if command -v sar &>/dev/null; then
+                    sar -A | less  # 显示所有历史数据（分页）
+                else
+                    echo -e "${gl_huang}正在安装 sysstat（包含sar工具）...${gl_bai}"
+                    if command -v apt &>/dev/null; then
+                        apt install -y sysstat
+                    elif command -v yum &>/dev/null; then
+                        yum install -y sysstat
+                    elif command -v dnf &>/dev/null; then
+                        dnf install -y sysstat
+                    fi
+                    echo -e "${gl_lv}安装完成，请24小时后查看历史数据${gl_bai}"
+                fi
+                send_stats "查看系统负载历史"
+                ;;
+            0)
+                break  # 返回主菜单
+                ;;
+            *)
+                echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
+                ;;
+        esac
+        break_end  # 暂停查看结果
+    done
+}
+
+
+# ============== Fail2ban防暴力破解模块 ==============
+# 安装Fail2ban
+install_fail2ban() {
+    root_use  # 权限检查
+    install_dependency  # 安装依赖
+
+    # 检查是否已安装
+    if command -v fail2ban-client &>/dev/null; then
+        echo -e "${gl_huang}Fail2ban已安装，跳过安装步骤${gl_bai}"
+        return
+    fi
+
+    # 安装Fail2ban（适配不同包管理器）
+    echo -e "${gl_huang}正在安装Fail2ban...${gl_bai}"
+    if command -v apt &>/dev/null; then
+        apt install -y fail2ban
+    elif command -v yum &>/dev/null; then
+        yum install -y fail2ban
+    elif command -v dnf &>/dev/null; then
+        dnf install -y fail2ban
+    elif command -v apk &>/dev/null; then
+        apk add fail2ban
+    else
+        echo -e "${gl_hong}不支持的包管理器，无法安装Fail2ban${gl_bai}"
+        return
+    fi
+
+    # 启动并设置开机自启
+    if command -v systemctl &>/dev/null; then
+        systemctl enable --now fail2ban
+    else
+        service fail2ban start
+        chkconfig fail2ban on
+    fi
+
+    echo -e "${gl_lv}Fail2ban安装完成${gl_bai}"
+    send_stats "安装 Fail2ban"
+}
+
+# 配置Fail2ban规则（SSH+Nginx防护）
+configure_fail2ban() {
+    root_use  # 权限检查
+    install_fail2ban  # 确保已安装
+
+    # 生成自定义规则配置（覆盖默认配置）
+    cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+ignoreip = 127.0.0.1/8          # 忽略本地IP
+bantime = 86400                 # 封禁时长（秒）：24小时
+findtime = 3600                 # 检测时长（秒）：1小时
+maxretry = 5                    # 最大失败次数：5次
+
+# SSH防暴力破解
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+
+# Nginx HTTP认证防护
+[nginx-http-auth]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+EOF
+
+    # 适配LDNMP环境（日志路径修正）
+    if [ -d "/opt/ldnmp/logs/nginx" ]; then
+        sed -i "s|/var/log/nginx/error.log|/opt/ldnmp/logs/nginx/error.log|g" /etc/fail2ban/jail.local
+    fi
+
+    # 重启Fail2ban生效
+    if command -v systemctl &>/dev/null; then
+        systemctl restart fail2ban
+    else
+        service fail2ban restart
+    fi
+
+    echo -e "${gl_lv}Fail2ban规则配置完成${gl_bai}"
+    send_stats "配置 Fail2ban 规则"
+}
+
+# Fail2ban管理主菜单
+fail2ban_menu() {
+    while true; do
+        clear
+        echo -e "${gl_XLtool}====== Fail2ban 防暴力破解 ======${gl_bai}"
+        send_stats "进入 Fail2ban 管理"
+
+        # 显示当前Fail2ban状态
+        local status="未安装"
+        if command -v fail2ban-client &>/dev/null; then
+            local jail_count=$(fail2ban-client status | grep "Number of jail" | awk '{print $4}')
+            status="已安装（运行中: $jail_count 个规则）"
+        fi
+        echo -e "${gl_huang}当前状态: $status${gl_bai}"
+
+        # 显示已启用的规则（若已安装）
+        if command -v fail2ban-client &>/dev/null; then
+            echo -e "\n${gl_huang}已启用的规则:${gl_bai}"
+            fail2ban-client status | grep "Jail list" | awk -F': ' '{print $2}'
+        fi
+
+        # 显示操作选项
+        echo -e "\n${gl_XLtool}操作选项${gl_bai}"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "1. 安装 Fail2ban"
+        echo "2. 配置默认规则（SSH+Nginx）"
+        echo "3. 查看被封禁的IP"
+        echo "4. 解封指定IP"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "5. 启动 Fail2ban 服务"
+        echo "6. 停止 Fail2ban 服务"
+        echo "7. 重启 Fail2ban 服务"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "0. 返回上一级菜单"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+
+        # 处理用户选择
+        read -e -p "请输入你的选择: " sub_choice
+        case $sub_choice in
+            1)
+                install_fail2ban  # 安装Fail2ban
+                ;;
+            2)
+                configure_fail2ban  # 配置规则
+                ;;
+            3)
+                # 查看被封禁IP
                 if command -v fail2ban-client &>/dev/null; then
                     read -e -p "请输入规则名称（如 sshd，留空查看所有）: " jail_name
-                    if [ -z "\)jail_name" ]; thenjails=$(fail2ban-client status | grep "Jail list" | awk -F': ' '{print $2}')for jail in \(jails; do
-                            echo -e "\n\){gl_huang} 规则 \(jail 封禁的IP:\){gl_bai}"fail2ban-client status $jail | grep "IP list" | awk -F': ' '{print \(2}'
-done
-else
-echo -e "\n\){gl_huang}规则 \(jail\_name 封禁的 IP:\){gl_bai}"fail2ban-client status $jail_name | grep "IP list" | awk -F': ' '{print \(2}'
+                    if [ -z "$jail_name" ]; then
+                        # 查看所有规则的封禁IP
+                        local jails=$(fail2ban-client status | grep "Jail list" | awk -F': ' '{print $2}')
+                        for jail in $jails; do
+                            echo -e "\n${gl_huang}规则 $jail 封禁的IP:${gl_bai}"
+                            fail2ban-client status "$jail" | grep "IP list" | awk -F': ' '{print $2}'
+                        done
+                    else
+                        # 查看指定规则的封禁IP
+                        echo -e "\n${gl_huang}规则 $jail_name 封禁的IP:${gl_bai}"
+                        fail2ban-client status "$jail_name" | grep "IP list" | awk -F': ' '{print $2}'
                     fi
                     send_stats "查看Fail2ban封禁IP"
                 else
-                    echo -e "\){gl_hong} 请先安装 Fail2ban（选择 1）\({gl_bai}"
+                    echo -e "${gl_hong}请先安装 Fail2ban（选择1）${gl_bai}"
                 fi
-                ;;             4)
+                ;;
+            4)
+                # 解封指定IP
                 if command -v fail2ban-client &>/dev/null; then
                     read -e -p "请输入要解封的IP: " unban_ip
                     read -e -p "请输入规则名称（如 sshd，留空表示所有规则）: " jail_name
-                    if [ -z "\)jail_name" ]; thenfail2ban-client unban $unban_ipelsefail2ban-client set $jail_name unbanip \(unban_ip
+                    if [ -z "$jail_name" ]; then
+                        fail2ban-client unban "$unban_ip"  # 所有规则解封
+                    else
+                        fail2ban-client set "$jail_name" unbanip "$unban_ip"  # 指定规则解封
                     fi
-                    echo -e "\){gl_lv}IP \(unban_ip 已解封\){gl_bai}"send_stats " 解封 IP:\(unban_ip"
+                    echo -e "${gl_lv}IP $unban_ip 已解封${gl_bai}"
+                    send_stats "解封 IP:$unban_ip"
                 else
-                    echo -e "\){gl_hong} 请先安装 Fail2ban（选择 1）\({gl_bai}"
+                    echo -e "${gl_hong}请先安装 Fail2ban（选择1）${gl_bai}"
                 fi
-                ;;             5)
+                ;;
+            5)
+                # 启动服务
                 if command -v fail2ban-client &>/dev/null; then
-                    start fail2ban
+                    if command -v systemctl &>/dev/null; then
+                        systemctl start fail2ban
+                    else
+                        service fail2ban start
+                    fi
+                    echo -e "${gl_lv}Fail2ban服务已启动${gl_bai}"
                 else
-                    echo -e "\){gl_hong} 请先安装 Fail2ban（选择 1）\({gl_bai}"
+                    echo -e "${gl_hong}请先安装 Fail2ban（选择1）${gl_bai}"
                 fi
-                ;;             6)
+                ;;
+            6)
+                # 停止服务
                 if command -v fail2ban-client &>/dev/null; then
-                    stop fail2ban
+                    if command -v systemctl &>/dev/null; then
+                        systemctl stop fail2ban
+                    else
+                        service fail2ban stop
+                    fi
+                    echo -e "${gl_lv}Fail2ban服务已停止${gl_bai}"
                 else
-                    echo -e "\){gl_hong} 请先安装 Fail2ban（选择 1）\({gl_bai}"
+                    echo -e "${gl_hong}请先安装 Fail2ban（选择1）${gl_bai}"
                 fi
-                ;;             7)
+                ;;
+            7)
+                # 重启服务
                 if command -v fail2ban-client &>/dev/null; then
-                    restart fail2ban
+                    if command -v systemctl &>/dev/null; then
+                        systemctl restart fail2ban
+                    else
+                        service fail2ban restart
+                    fi
+                    echo -e "${gl_lv}Fail2ban服务已重启${gl_bai}"
                 else
-                    echo -e "\){gl_hong} 请先安装 Fail2ban（选择 1）\({gl_bai}"
+                    echo -e "${gl_hong}请先安装 Fail2ban（选择1）${gl_bai}"
                 fi
-                ;;             0)
-                break
+                ;;
+            0)
+                break  # 返回上一级
                 ;;
             *)
-                echo -e "\){gl_hong}❌ 无效选择，请重新输入 ${gl_bai}";;esacbreak_enddone}============== 系统工具 ==============系统更新system_update() {root_useecho -e "\({gl_huang}正在更新系统...\){gl_bai}"if command -v apt &>/dev/null; thenapt update -yapt upgrade -yapt autoremove -yapt autocleanelif command -v yum &>/dev/null; thenyum update -yyum upgrade -yyum autoremove -yelif command -v dnf &>/dev/null; thendnf update -ydnf upgrade -ydnf autoremove -yelif command -v apk &>/dev/null; thenapk updateapk upgradeapk cache cleanelif command -v pacman &>/dev/null; thenpacman -Syu --noconfirmelif command -v zypper &>/dev/null; thenzypper refreshzypper update -yelseecho -e "\({gl_hong}不支持的包管理器，无法更新系统\){gl_bai}"return 1fiecho -e "\({gl_lv}系统更新完成\){gl_bai}"send_stats "系统更新"}更换软件源（国内镜像）change_mirror() {root_uselocal country=\((curl -s ipinfo.io/country 2>/dev/null)
-    if [ "\)country" != "CN" ]; thenread -e -p "\((echo -e "\){gl_huang} 检测到非国内 IP，确定更换为国内源吗？(Y/N): \({gl_bai}")" confirm
-        if [ "\)confirm" != "Y" ] && [ "\(confirm" != "y" ]; then
-            echo -e "\){gl_huang} 已取消操作 ${gl_bai}"return 1fifiif [ -f /etc/os-release ]; then. /etc/os-releasecase "$ID" inubuntu|debian)备份源文件cp /etc/apt/sources.list /etc/apt/sources.list.bakUbuntu 国内源（阿里云）if [ "\(ID" = "ubuntu" ]; then
-                    local codename=\)(lsb_release -c | awk '{print $2}')cat > /etc/apt/sources.list << EOFdeb http://mirrors.aliyun.com/ubuntu/ $codename main restricted universe multiversedeb-src http://mirrors.aliyun.com/ubuntu/ $codename main restricted universe multiversedeb http://mirrors.aliyun.com/ubuntu/ $codename-security main restricted universe multiversedeb-src http://mirrors.aliyun.com/ubuntu/ $codename-security main restricted universe multiversedeb http://mirrors.aliyun.com/ubuntu/ $codename-updates main restricted universe multiversedeb-src http://mirrors.aliyun.com/ubuntu/ $codename-updates main restricted universe multiversedeb http://mirrors.aliyun.com/ubuntu/ $codename-backports main restricted universe multiversedeb-src http://mirrors.aliyun.com/ubuntu/ $codename-backports main restricted universe multiverseEOFDebian 国内源（阿里云）elselocal codename=$(cat /etc/debian_version | cut -d '/' -f1)cat > /etc/apt/sources.list << EOFdeb http://mirrors.aliyun.com/debian/ $codename main non-free contribdeb-src http://mirrors.aliyun.com/debian/ $codename main non-free contribdeb http://mirrors.aliyun.com/debian-security/ $codename-security maindeb-src http://mirrors.aliyun.com/debian-security/ $codename-security maindeb http://mirrors.aliyun.com/debian/ $codename-updates main non-free contribdeb-src http://mirrors.aliyun.com/debian/ $codename-updates main non-free contribEOFfiapt update -yecho -e "\({gl_lv}APT源已更换为阿里云镜像\){gl_bai}"send_stats "更换 APT 源为阿里云";;centos|rhel|almalinux|rocky)备份源文件mkdir -p /etc/yum.repos.d/bakmv /etc/yum.repos.d/*.repo /etc/yum.repos.d/bak/CentOS 国内源（阿里云）if [ "\(ID" = "centos" ]; then
-                    local version=\)(cat /etc/centos-release | grep -oE '[0-9]+.[0-9]+' | cut -d '.' -f1)curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-$version.repoRHEL 系列国内源（阿里云）elsecurl -o /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repofiyum clean allyum makecacheecho -e "\({gl_lv}YUM源已更换为阿里云镜像\){gl_bai}"send_stats "更换 YUM 源为阿里云";;alpine)备份源文件cp /etc/apk/repositories /etc/apk/repositories.bakAlpine 国内源（阿里云）cat > /etc/apk/repositories << EOFhttps://mirrors.aliyun.com/alpine/v3.16/main/https://mirrors.aliyun.com/alpine/v3.16/community/EOFapk updateecho -e "\({gl_lv}APK源已更换为阿里云镜像\){gl_bai}"send_stats "更换 APK 源为阿里云";;*)echo -e "${gl_hong}不支持的发行版: ID{gl_bai}"return 1;;esacelseecho -e "${gl_hong} 无法确定操作系统 ${gl_bai}"return 1fi}系统工具菜单system_tools() {while true; doclearecho -e "\({gl_XLtool}====== 系统工具 ======\){gl_bai}"send_stats "进入系统工具"echo "1. 系统更新与升级"echo "2. 更换国内软件源（加速下载）"echo "3. 防火墙高级管理"echo "4. Swap 虚拟内存管理"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "5. 清理系统垃圾"echo "6. 查看系统日志"echo "7. 设置时区（默认 Asia/Shanghai）"echo "8. 重启 / 关机"echo -e "\({gl_XLtool}------------------------\){gl_bai}"echo "0. 返回主菜单"echo -e "\({gl_XLtool}------------------------\){gl_bai}"read -e -p "请输入你的选择:" choicecase \(choice in             1)
-                system_update
-                ;;             2)
-                change_mirror
-                ;;             3)
-                iptables_panel
-                ;;             4)
-                swap_manage_menu
-                ;;             5)
+                echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
+                ;;
+        esac
+        break_end  # 暂停查看结果
+    done
+}
+
+
+# ============== 系统工具模块 ==============
+# 系统更新与升级
+system_update() {
+    root_use  # 权限检查
+    echo -e "${gl_huang}正在更新系统...${gl_bai}"
+
+    # 适配不同包管理器
+    if command -v apt &>/dev/null; then
+        apt update -y
+        apt upgrade -y
+        apt autoremove -y
+        apt autoclean
+    elif command -v yum &>/dev/null; then
+        yum update -y
+        yum upgrade -y
+        yum autoremove -y
+    elif command -v dnf &>/dev/null; then
+        dnf update -y
+        dnf upgrade -y
+        dnf autoremove -y
+    elif command -v apk &>/dev/null; then
+        apk update
+        apk upgrade
+        apk cache clean
+    elif command -v pacman &>/dev/null; then
+        pacman -Syu --noconfirm
+    elif command -v zypper &>/dev/null; then
+        zypper refresh
+        zypper update -y
+    else
+        echo -e "${gl_hong}不支持的包管理器，无法更新系统${gl_bai}"
+        return 1
+    fi
+
+    echo -e "${gl_lv}系统更新完成${gl_bai}"
+    send_stats "系统更新"
+}
+
+# 更换国内软件源（阿里云镜像，加速下载）
+change_mirror() {
+    root_use  # 权限检查
+    # 检测IP归属地（非国内IP需二次确认）
+    local country=$(curl -s --max-time 2 ipinfo.io/country 2>/dev/null)
+    if [ "$country" != "CN" ] && [ -n "$country" ]; then
+        read -e -p "$(echo -e "${gl_huang}检测到非国内IP，确定更换为国内源吗？(Y/N): ${gl_bai}")" confirm
+        if [ "$confirm" != "Y" ] && [ "$confirm" != "y" ]; then
+            echo -e "${gl_huang}已取消操作${gl_bai}"
+            return 1
+        fi
+    fi
+
+    # 识别操作系统（基于/etc/os-release）
+    if [ ! -f /etc/os-release ]; then
+        echo -e "${gl_hong}无法确定操作系统${gl_bai}"
+        return 1
+    fi
+    . /etc/os-release
+
+    case "$ID" in
+        ubuntu|debian)
+            # APT源（Ubuntu/Debian）
+            cp /etc/apt/sources.list /etc/apt/sources.list.bak  # 备份原配置
+            if [ "$ID" = "ubuntu" ]; then
+                # Ubuntu阿里云源
+                local codename=$(lsb_release -c | awk '{print $2}')
+                cat > /etc/apt/sources.list << EOF
+deb http://mirrors.aliyun.com/ubuntu/ $codename main restricted universe multiverse
+deb-src http://mirrors.aliyun.com/ubuntu/ $codename main restricted universe multiverse
+deb http://mirrors.aliyun.com/ubuntu/ $codename-security main restricted universe multiverse
+deb-src http://mirrors.aliyun.com/ubuntu/ $codename-security main restricted universe multiverse
+deb http://mirrors.aliyun.com/ubuntu/ $codename-updates main restricted universe multiverse
+deb-src http://mirrors.aliyun.com/ubuntu/ $codename-updates main restricted universe multiverse
+deb http://mirrors.aliyun.com/ubuntu/ $codename-backports main restricted universe multiverse
+deb-src http://mirrors.aliyun.com/ubuntu/ $codename-backports main restricted universe multiverse
+EOF
+            else
+                # Debian阿里云源
+                local codename=$(cat /etc/debian_version | cut -d '/' -f1)
+                cat > /etc/apt/sources.list << EOF
+deb http://mirrors.aliyun.com/debian/ $codename main non-free contrib
+deb-src http://mirrors.aliyun.com/debian/ $codename main non-free contrib
+deb http://mirrors.aliyun.com/debian-security/ $codename-security main
+deb-src http://mirrors.aliyun.com/debian-security/ $codename-security main
+deb http://mirrors.aliyun.com/debian/ $codename-updates main non-free contrib
+deb-src http://mirrors.aliyun.com/debian/ $codename-updates main non-free contrib
+EOF
+            fi
+            apt update -y  # 更新源缓存
+            echo -e "${gl_lv}APT源已更换为阿里云镜像${gl_bai}"
+            send_stats "更换 APT 源为阿里云"
+            ;;
+        centos|rhel|almalinux|rocky)
+            # YUM源（CentOS/RHEL系列）
+            mkdir -p /etc/yum.repos.d/bak  # 备份目录
+            mv /etc/yum.repos.d/*.repo /etc/yum.repos.d/bak/  # 备份原配置
+            if [ "$ID" = "centos" ]; then
+                # CentOS阿里云源
+                local version=$(cat /etc/centos-release | grep -oE '[0-9]+\.[0-9]+' | cut -d '.' -f1)
+                curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-$version.repo
+            else
+                # RHEL系列阿里云源（EPEL）
+                curl -o /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repo
+            fi
+            yum clean all && yum makecache  # 清理缓存并生成新缓存
+            echo -e "${gl_lv}YUM源已更换为阿里云镜像${gl_bai}"
+            send_stats "更换 YUM 源为阿里云"
+            ;;
+        alpine)
+            # APK源（Alpine）
+            cp /etc/apk/repositories /etc/apk/repositories.bak  # 备份原配置
+            cat > /etc/apk/repositories << EOF
+https://mirrors.aliyun.com/alpine/v3.16/main/
+https://mirrors.aliyun.com/alpine/v3.16/community/
+EOF
+            apk update  # 更新源缓存
+            echo -e "${gl_lv}APK源已更换为阿里云镜像${gl_bai}"
+            send_stats "更换 APK 源为阿里云"
+            ;;
+        *)
+            echo -e "${gl_hong}不支持的发行版: $ID${gl_bai}"
+            return 1
+            ;;
+    esac
+}
+
+# 系统工具主菜单
+system_tools() {
+    while true; do
+        clear
+        echo -e "${gl_XLtool}====== 系统工具 ======${gl_bai}"
+        send_stats "进入系统工具"
+
+        # 显示操作选项
+        echo "1. 系统更新与升级"
+        echo "2. 更换国内软件源（加速下载）"
+        echo "3. 防火墙高级管理"
+        echo "4. Swap 虚拟内存管理"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "5. 清理系统垃圾"
+        echo "6. 查看系统日志"
+        echo "7. 设置时区（默认 Asia/Shanghai）"
+        echo "8. 重启 / 关机"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+        echo "0. 返回主菜单"
+        echo -e "${gl_XLtool}------------------------${gl_bai}"
+
+        # 处理用户选择
+        read -e -p "请输入你的选择: " choice
+        case $choice in
+            1)
+                system_update  # 系统更新
+                ;;
+            2)
+                change_mirror  # 更换国内源
+                ;;
+            3)
+                iptables_panel  # 防火墙管理（预设函数）
+                ;;
+            4)
+                swap_manage_menu  # Swap管理（预设函数）
+                ;;
+            5)
+                # 清理系统垃圾
                 root_use
-                echo -e "\){gl_huang} 正在清理系统垃圾...${gl_bai}"清理 APT 缓存if command -v apt &>/dev/null; thenapt autoremove -yapt autocleanrm -rf /var/cache/apt/archives/*fi清理 YUM 缓存if command -v yum &>/dev/null; thenyum clean allrm -rf /var/cache/yum/*fi清理临时文件rm -rf /tmp/*rm -rf /var/tmp/*清理日志文件find /var/log -type f -name "*.log" -exec truncate -s 0 {} ;echo -e "\({gl_lv}系统垃圾清理完成\){gl_bai}"send_stats "清理系统垃圾";;6)echo "1. 系统日志（/var/log/syslog 或 /var/log/messages）"echo "2. 安全日志（/var/log/auth.log 或 /var/log/secure）"echo "3. 内核日志（/var/log/kern.log）"read -e -p "请选择查看的日志类型:" log_choicecase \(log_choice in                     1)
-                        log_file="/var/log/syslog"                         [ ! -f "\)log_file" ] && log_file="/var/log/messages";;2)log_file="/var/log/auth.log"[ ! -f "\(log_file" ] && log_file="/var/log/secure"
-                        ;;                     3)
-                        log_file="/var/log/kern.log"
+                echo -e "${gl_huang}正在清理系统垃圾...${gl_bai}"
+                # 清理APT缓存
+                if command -v apt &>/dev/null; then
+                    apt autoremove -y
+                    apt autoclean
+                    rm -rf /var/cache/apt/archives/*
+                fi
+                # 清理YUM缓存
+                if command -v yum &>/dev/null; then
+                    yum clean all
+                    rm -rf /var/cache/yum/*
+                fi
+                # 清理临时文件
+                rm -rf /tmp/*
+                rm -rf /var/tmp/*
+                # 清理日志文件（截断而非删除）
+                find /var/log -type f -name "*.log" -exec truncate -s 0 {} \;
+                echo -e "${gl_lv}系统垃圾清理完成${gl_bai}"
+                send_stats "清理系统垃圾"
+                ;;
+            6)
+                # 查看系统日志
+                echo "1. 系统日志（/var/log/syslog 或 /var/log/messages）"
+                echo "2. 安全日志（/var/log/auth.log 或 /var/log/secure）"
+                echo "3. 内核日志（/var/log/kern.log）"
+                read -e -p "请选择查看的日志类型: " log_choice
+                case $log_choice in
+                    1)
+                        local log_file="/var/log/syslog"
+                        [ ! -f "$log_file" ] && log_file="/var/log/messages"  # 适配CentOS
+                        ;;
+                    2)
+                        local log_file="/var/log/auth.log"
+                        [ ! -f "$log_file" ] && log_file="/var/log/secure"  # 适配CentOS
+                        ;;
+                    3)
+                        local log_file="/var/log/kern.log"
                         ;;
                     *)
-                        echo -e "\){gl_hong} 无效选择 ${gl_bai}"continue;;esacif [ -f "\(log_file" ]; then
+                        echo -e "${gl_hong}无效选择${gl_bai}"
+                        continue
+                        ;;
+                esac
+                # 显示日志（支持自定义行数）
+                if [ -f "$log_file" ]; then
                     read -e -p "显示行数(默认100): " lines
-                    lines=\){lines:-100}tail -n \(lines "\)log_file"send_stats " 查看系统日志:\(log_file"
+                    lines=${lines:-100}
+                    tail -n "$lines" "$log_file"
+                    send_stats "查看系统日志:$log_file"
                 else
-                    echo -e "\){gl_hong} 未找到日志文件: \(log_file\){gl_bai}"fi;;7)root_useecho -e "\({gl_huang}正在设置时区为 Asia/Shanghai...\){gl_bai}"timedatectl set-timezone Asia/Shanghaiecho -e "${gl_lv}时区设置完成，当前时间: \((date)\){gl_bai}"send_stats "设置时区为Asia/Shanghai";; 8)echo "1. 重启系统"echo "2. 关闭系统"read -e -p "请选择操作: " power_choicecase \(power\_choice in
-1\)
-read -e -p "确定要重启系统吗？(Y/N):" confirm
-if \[ "\)confirm" = "Y" ] || [ "\(confirm"="y" ]; then
-send\_stats "重启系统"
-reboot
-fi
-;;
-2\)
-read -e -p "确定要关闭系统吗？(Y/N):" confirm
-if \[ "\)confirm" = "Y" ] || [ "\(confirm"="y" ]; then
-send\_stats "关闭系统"
-poweroff
-fi
-;;
-\*)
-echo -e "\){gl_hong}无效选择\({gl\_bai}"
-;;
-esac
-;;
-0\)
-break
-;;
-\*)
-echo -e "\){gl_hong}❌ 无效选择，请重新输入${gl_bai}";;esacbreak_enddone}============== 脚本主菜单 ==============XLtool () {clearCheckFirstRun_false # 检查许可协议while true; doclearecho -e "\({gl_XLtool}\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\##\){gl_bai}"echo -e "\({gl_XLtool}\#                                                      \#\){gl_bai}"echo -e "\({gl_XLtool}\#               XLtool 服务器管理工具箱 v\)sh_v #\({gl_bai}"
-        echo -e "\){gl_XLtool}# https://blog.5881314.xyz #\({gl_bai}"
-        echo -e "\){gl_XLtool}# #\({gl_bai}"
-        echo -e "\){gl_XLtool}########################################################\({gl_bai}"
-        echo -e "\n\){gl_XLtool}【容器与环境管理】\({gl_bai}"
+                    echo -e "${gl_hong}未找到日志文件: $log_file${gl_bai}"
+                fi
+                ;;
+            7)
+                # 设置时区（默认上海）
+                root_use
+                echo -e "${gl_huang}正在设置时区为 Asia/Shanghai...${gl_bai}"
+                timedatectl set-timezone Asia/Shanghai
+                echo -e "${gl_lv}时区设置完成，当前时间: $(date)${gl_bai}"
+                send_stats "设置时区为Asia/Shanghai"
+                ;;
+            8)
+                # 重启/关机
+                echo "1. 重启系统"
+                echo "2. 关闭系统"
+                read -e -p "请选择操作: " power_choice
+                case $power_choice in
+                    1)
+                        read -e -p "确定要重启系统吗？(Y/N): " confirm
+                        if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
+                            send_stats "重启系统"
+                            reboot
+                        fi
+                        ;;
+                    2)
+                        read -e -p "确定要关闭系统吗？(Y/N): " confirm
+                        if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
+                            send_stats "关闭系统"
+                            poweroff
+                        fi
+                        ;;
+                    *)
+                        echo -e "${gl_hong}无效选择${gl_bai}"
+                        ;;
+                esac
+                ;;
+            0)
+                break  # 返回主菜单
+                ;;
+            *)
+                echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
+                ;;
+        esac
+        break_end  # 暂停查看结果
+    done
+}
+
+
+# ============== 脚本主菜单 ==============
+XLtool() {
+    clear
+    CheckFirstRun_false  # 检查许可协议（预设函数）
+    local sh_v="1.0.0"  # 脚本版本（示例）
+    local gh_proxy="https://ghproxy.com/"  # GitHub代理（加速更新）
+
+    while true; do
+        clear
+        # 显示脚本头部信息
+        echo -e "${gl_XLtool}########################################################${gl_bai}"
+        echo -e "${gl_XLtool}#                                                      #${gl_bai}"
+        echo -e "${gl_XLtool}#               XLtool 服务器管理工具箱 v$sh_v               #${gl_bai}"
+        echo -e "${gl_XLtool}#                  https://blog.5881314.xyz             #${gl_bai}"
+        echo -e "${gl_XLtool}#                                                      #${gl_bai}"
+        echo -e "${gl_XLtool}########################################################${gl_bai}"
+
+        # 显示主菜单选项
+        echo -e "\n${gl_XLtool}【容器与环境管理】${gl_bai}"
         echo "1. Docker 管理中心（安装/容器/镜像/应用部署）"
         echo "2. LDNMP 环境管理（Nginx+PHP+MySQL）"
-        echo -e "\n\){gl_XLtool}【网站与安全】\({gl_bai}"
+        echo -e "\n${gl_XLtool}【网站与安全】${gl_bai}"
         echo "3. 站点管理（创建/配置/反向代理）"
         echo "4. SSL 证书管理（申请/部署/续期）"
         echo "5. Fail2ban 防暴力破解"
-        echo -e "\n\){gl_XLtool}【系统与监控】\({gl_bai}"
+        echo -e "\n${gl_XLtool}【系统与监控】${gl_bai}"
         echo "6. 服务器监控与信息"
         echo "7. 系统工具（更新/源/防火墙/Swap等）"
-        echo -e "\n\){gl_XLtool}【其他】\({gl_bai}"
+        echo -e "\n${gl_XLtool}【其他】${gl_bai}"
         echo "8. 脚本更新"
         echo "9. 隐私设置（关闭统计）"
-        echo -e "\n\){gl_XLtool} 0. 退出脚本\({gl_bai}"
-        echo -e "\n\){gl_XLtool}########################################################${gl_bai}"read -e -p "请输入你的选择 [0-9]:" choicecase \(choice in             1)
-                docker_menu
-                ;;             2)
-                ldnmp_menu
-                ;;             3)
-                site_menu
-                ;;             4)
-                ssl_menu
-                ;;             5)
-                fail2ban_menu
-                ;;             6)
-                monitor_menu
-                ;;             7)
-                system_tools
-                ;;             8)
-                echo -e "\){gl_huang} 正在检查更新...${gl_bai}"curl -sSL --connect-timeout 10 "https://raw.githubusercontent.com/kejilion/XLtool/main/XLtool.sh" -o /tmp/XLtool_new.shif [ \(? -ne 0 ]; then
-echo -e "\){gl_hong}更新失败，尝试使用代理...${gl_bai}"curl -sSL --connect-timeout 10 "${gh_proxy}raw.githubusercontent.com/kejilion/XLtool/main/XLtool.sh" -o /tmp/XLtool_new.shfiif [ -f "/tmp/XLtool_new.sh" ]; thenchmod +x /tmp/XLtool_new.shnew_version=\((grep 'sh_v="' /tmp/XLtool_new.sh | cut -d'"' -f2)
-                    if [ "\)new_version" != "\(sh_v" ]; then
-                        read -e -p "发现新版本 v\)new_version，是否更新？(Y/N): " confirmif [ "\(confirm" = "Y" ] || [ "\)confirm" = "y" ]; thencp -f /tmp/XLtool_new.sh ~/XLtool.shchmod +x ~/XLtool.shcp -f /tmp/XLtool_new.sh /usr/local/bin/k 2>/dev/nullchmod +x /usr/local/bin/k 2>/dev/nullecho -e "\({gl_lv}更新完成，请重新运行脚本\){gl_bai}"send_stats " 脚本更新至 v\(new_version"
+        echo -e "\n${gl_XLtool}0. 退出脚本${gl_bai}"
+        echo -e "\n${gl_XLtool}########################################################${gl_bai}"
+
+        # 处理用户选择
+        read -e -p "请输入你的选择 [0-9]: " choice
+        case $choice in
+            1)
+                docker_menu  # Docker管理（预设函数）
+                ;;
+            2)
+                ldnmp_menu  # LDNMP管理（预设函数）
+                ;;
+            3)
+                site_menu  # 站点管理（当前模块）
+                ;;
+            4)
+                ssl_menu  # SSL管理（预设函数）
+                ;;
+            5)
+                fail2ban_menu  # Fail2ban管理（当前模块）
+                ;;
+            6)
+                monitor_menu  # 服务器监控（当前模块）
+                ;;
+            7)
+                system_tools  # 系统工具（当前模块）
+                ;;
+            8)
+                # 脚本更新（从GitHub拉取最新版本）
+                echo -e "${gl_huang}正在检查更新...${gl_bai}"
+                local update_url="https://raw.githubusercontent.com/kejilion/XLtool/main/XLtool.sh"
+                local proxy_url="$gh_proxy$update_url"
+                # 尝试直接下载/代理下载
+                curl -sSL --connect-timeout 10 "$update_url" -o /tmp/XLtool_new.sh
+                if [ $? -ne 0 ]; then
+                    echo -e "${gl_hong}更新失败，尝试使用代理...${gl_bai}"
+                    curl -sSL --connect-timeout 10 "$proxy_url" -o /tmp/XLtool_new.sh
+                fi
+                # 检查更新文件是否存在
+                if [ -f "/tmp/XLtool_new.sh" ]; then
+                    chmod +x /tmp/XLtool_new.sh
+                    # 对比版本（假设新版本通过grep提取）
+                    local new_version=$(grep 'sh_v="' /tmp/XLtool_new.sh | cut -d'"' -f2)
+                    if [ "$new_version" != "$sh_v" ]; then
+                        read -e -p "发现新版本 v$new_version，是否更新？(Y/N): " confirm
+                        if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
+                            # 覆盖旧版本（安装路径：用户目录+系统目录）
+                            cp -f /tmp/XLtool_new.sh ~/XLtool.sh
+                            cp -f /tmp/XLtool_new.sh /usr/local/bin/k 2>/dev/null
+                            chmod +x ~/XLtool.sh /usr/local/bin/k 2>/dev/null
+                            echo -e "${gl_lv}更新完成，请重新运行脚本${gl_bai}"
+                            send_stats "脚本更新至 v$new_version"
                             exit 0
                         fi
                     else
-                        echo -e "\){gl_lv} 当前已是最新版本 v\(sh_v\){gl_bai}"firm -f /tmp/XLtool_new.shelseecho -e "\({gl_hong}更新失败，无法获取新版本\){gl_bai}"fibreak_end;;9)read -e -p "确定要关闭使用统计吗？(Y/N):" confirmif [ "\(confirm" = "Y" ] || [ "\)confirm" = "y" ]; thenyinsiyuanquan2echo -e "\({gl_lv}已关闭使用统计\){gl_bai}"send_stats "关闭使用统计"elseecho -e "\({gl_huang}已取消操作\){gl_bai}"fibreak_end;;0)echo -e "\({gl_XLtool}感谢使用 XLtool 脚本，再见！\){gl_bai}"send_stats "退出脚本"exit 0;;*)echo -e "\({gl_hong}❌ 无效选择，请输入 0-9 之间的数字\){gl_bai}"break_end;;esacdone}初始化脚本root_useXLtool
+                        echo -e "${gl_lv}当前已是最新版本 v$sh_v${gl_bai}"
+                    fi
+                    rm -f /tmp/XLtool_new.sh  # 清理临时文件
+                else
+                    echo -e "${gl_hong}更新失败，无法获取新版本${gl_bai}"
+                fi
+                ;;
+            9)
+                # 隐私设置（关闭统计）
+                read -e -p "确定要关闭使用统计吗？(Y/N): " confirm
+                if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
+                    yinsiyuanquan2  # 关闭统计（预设函数）
+                    echo -e "${gl_lv}已关闭使用统计${gl_bai}"
+                    send_stats "关闭使用统计"
+                else
+                    echo -e "${gl_huang}已取消操作${gl_bai}"
+                fi
+                ;;
+            0)
+                # 退出脚本
+                echo -e "${gl_XLtool}感谢使用 XLtool 脚本，再见！${gl_bai}"
+                send_stats "退出脚本"
+                exit 0
+                ;;
+            *)
+                echo -e "${gl_hong}❌ 无效选择，请输入 0-9 之间的数字${gl_bai}"
+                ;;
+        esac
+        break_end  # 暂停查看结果
+    done
+}
+
+
+# ============== 脚本初始化 ==============
+root_use  # 检查root权限（必须root执行）
+XLtool    # 启动主菜单
