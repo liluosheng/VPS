@@ -1643,6 +1643,173 @@ docker_app_deploy() {
                 echo -e "${gl_lv}Redis已部署，端口: $docker_port${gl_bai}"
                 send_stats "部署Docker应用:Redis"
                 ;;
+            4)  # MongoDB
+                docker_name="mongodb"
+                docker_img="mongo:latest"
+                read -e -p "请输入映射端口（默认27017）: " docker_port
+                docker_port=${docker_port:-27017}
+                read -e -p "请输入数据目录（默认./mongodb）: " data_dir
+                data_dir=${data_dir:-./mongodb}
+                read -e -p "是否启用认证？(y/n，默认n): " auth_choice
+                auth_opt=""
+                if [ "$auth_choice" = "y" ] || [ "$auth_choice" = "Y" ]; then
+                    read -e -p "请设置管理员用户名: " mongo_user
+                    read -e -p "请设置管理员密码: " mongo_pwd
+                    auth_opt="-e MONGO_INITDB_ROOT_USERNAME=$mongo_user -e MONGO_INITDB_ROOT_PASSWORD=$mongo_pwd"
+                fi
+                mkdir -p $data_dir
+                sudo docker run -dit --name $docker_name \
+                    -p $docker_port:27017 \
+                    -v $data_dir:/data/db \
+                    $auth_opt \
+                    --restart always \
+                    $docker_img
+                echo -e "${gl_lv}MongoDB已部署，端口: $docker_port ${gl_huang}（若启用认证，需使用用户名密码连接）${gl_bai}"
+                send_stats "部署Docker应用:MongoDB"
+                ;;
+            5)  # PostgreSQL
+                docker_name="postgresql"
+                docker_img="postgres:latest"
+                read -e -p "请输入映射端口（默认5432）: " docker_port
+                docker_port=${docker_port:-5432}
+                read -e -p "请输入数据库用户名: " pg_user
+                read -e -p "请输入数据库密码: " pg_pwd
+                read -e -p "请输入初始数据库名: " pg_db
+                read -e -p "请输入数据目录（默认./postgresql）: " data_dir
+                data_dir=${data_dir:-./postgresql}
+                mkdir -p $data_dir
+                sudo docker run -dit --name $docker_name \
+                    -p $docker_port:5432 \
+                    -v $data_dir:/var/lib/postgresql/data \
+                    -e POSTGRES_USER=$pg_user \
+                    -e POSTGRES_PASSWORD=$pg_pwd \
+                    -e POSTGRES_DB=$pg_db \
+                    --restart always \
+                    $docker_img
+                echo -e "${gl_lv}PostgreSQL已部署，端口: $docker_port，数据库: $pg_db，用户: $pg_user${gl_bai}"
+                send_stats "部署Docker应用:PostgreSQL"
+                ;;
+            6)  # PHP 7.4
+                docker_name="php74"
+                docker_img="php:7.4-fpm"
+                read -e -p "请输入映射端口（默认9000）: " docker_port
+                docker_port=${docker_port:-9000}
+                read -e -p "请输入网站根目录（默认./php/www）: " web_dir
+                web_dir=${web_dir:-./php/www}
+                mkdir -p $web_dir
+                # 安装常用PHP扩展（如mysqli、pdo_mysql）
+                sudo docker run -dit --name $docker_name \
+                    -p $docker_port:9000 \
+                    -v $web_dir:/var/www/html \
+                    --restart always \
+                    $docker_img \
+                    sh -c "docker-php-ext-install mysqli pdo_mysql && php-fpm"
+                echo -e "${gl_lv}PHP 7.4已部署，端口: $docker_port，网站目录: $web_dir${gl_bai}"
+                send_stats "部署Docker应用:PHP"
+                ;;
+            7)  # Node.js
+                docker_name="nodejs"
+                docker_img="node:latest"
+                read -e -p "请输入映射端口（默认3000）: " docker_port
+                docker_port=${docker_port:-3000}
+                read -e -p "请输入项目目录（默认./nodejs）: " proj_dir
+                proj_dir=${proj_dir:-./nodejs}
+                mkdir -p $proj_dir
+                # 启动时进入交互模式（可执行node命令）
+                sudo docker run -it --name $docker_name \
+                    -p $docker_port:3000 \
+                    -v $proj_dir:/app \
+                    -w /app \
+                    --restart unless-stopped \
+                    $docker_img
+                echo -e "${gl_lv}Node.js容器已启动，项目目录: $proj_dir${gl_bai}"
+                send_stats "部署Docker应用:Node.js"
+                ;;
+            8)  # Python
+                docker_name="python"
+                docker_img="python:latest"
+                read -e -p "请输入项目目录（默认./python）: " proj_dir
+                proj_dir=${proj_dir:-./python}
+                mkdir -p $proj_dir
+                # 启动时进入Python交互模式
+                sudo docker run -it --name $docker_name \
+                    -v $proj_dir:/app \
+                    -w /app \
+                    --restart unless-stopped \
+                    $docker_img \
+                    python
+                echo -e "${gl_lv}Python容器已启动，项目目录: $proj_dir${gl_bai}"
+                send_stats "部署Docker应用:Python"
+                ;;
+            9)  # Jenkins
+                docker_name="jenkins"
+                docker_img="jenkins/jenkins:lts"
+                read -e -p "请输入映射端口（默认8080）: " docker_port
+                docker_port=${docker_port:-8080}
+                read -e -p "请输入数据目录（默认./jenkins）: " data_dir
+                data_dir=${data_dir:-./jenkins}
+                mkdir -p $data_dir
+                # 赋予目录权限（Jenkins容器内用户ID为1000）
+                chown -R 1000:1000 $data_dir
+                sudo docker run -dit --name $docker_name \
+                    -p $docker_port:8080 \
+                    -p 50000:50000 \
+                    -v $data_dir:/var/jenkins_home \
+                    --restart always \
+                    $docker_img
+                echo -e "${gl_lv}Jenkins已部署，访问地址: http://$(curl -s ipinfo.io/ip):$docker_port${gl_bai}"
+                echo -e "${gl_huang}初始密码可通过命令查看: sudo docker exec $docker_name cat /var/jenkins_home/secrets/initialAdminPassword${gl_bai}"
+                send_stats "部署Docker应用:Jenkins"
+                ;;
+            10)  # GitLab
+                docker_name="gitlab"
+                docker_img="gitlab/gitlab-ce:latest"
+                read -e -p "请输入HTTP端口（默认8081）: " http_port
+                http_port=${http_port:-8081}
+                read -e -p "请输入SSH端口（默认2222）: " ssh_port
+                ssh_port=${ssh_port:-2222}
+                read -e -p "请输入数据目录（默认./gitlab）: " data_dir
+                data_dir=${data_dir:-./gitlab}
+                mkdir -p $data_dir/{config,logs,data}
+                sudo docker run -dit --name $docker_name \
+                    -p $http_port:80 \
+                    -p $ssh_port:22 \
+                    -v $data_dir/config:/etc/gitlab \
+                    -v $data_dir/logs:/var/log/gitlab \
+                    -v $data_dir/data:/var/opt/gitlab \
+                    --restart always \
+                    $docker_img
+                echo -e "${gl_lv}GitLab已部署，访问地址: http://$(curl -s ipinfo.io/ip):$http_port${gl_bai}"
+                echo -e "${gl_huang}首次启动较慢，约5-10分钟，请耐心等待${gl_bai}"
+                send_stats "部署Docker应用:GitLab"
+                ;;
+            11)  # WordPress
+                docker_name="wordpress"
+                docker_img="wordpress:latest"
+                read -e -p "请输入映射端口（默认8082）: " docker_port
+                docker_port=${docker_port:-8082}
+                # 依赖MySQL，需用户提供已有的MySQL信息
+                read -e -p "请输入MySQL主机IP（如127.0.0.1）: " mysql_host
+                read -e -p "请输入MySQL端口（默认3306）: " mysql_port
+                mysql_port=${mysql_port:-3306}
+                read -e -p "请输入MySQL数据库名: " mysql_db
+                read -e -p "请输入MySQL用户名: " mysql_user
+                read -e -p "请输入MySQL密码: " mysql_pwd
+                read -e -p "请输入数据目录（默认./wordpress）: " data_dir
+                data_dir=${data_dir:-./wordpress}
+                mkdir -p $data_dir
+                sudo docker run -dit --name $docker_name \
+                    -p $docker_port:80 \
+                    -v $data_dir:/var/www/html \
+                    -e WORDPRESS_DB_HOST=$mysql_host:$mysql_port \
+                    -e WORDPRESS_DB_NAME=$mysql_db \
+                    -e WORDPRESS_DB_USER=$mysql_user \
+                    -e WORDPRESS_DB_PASSWORD=$mysql_pwd \
+                    --restart always \
+                    $docker_img
+                echo -e "${gl_lv}WordPress已部署，访问地址: http://$(curl -s ipinfo.io/ip):$docker_port${gl_bai}"
+                send_stats "部署Docker应用:WordPress"
+                ;;
             12)  # 自定义应用
                 read -e -p "请输入镜像名: " docker_img
                 read -e -p "请输入容器名: " docker_name
@@ -1663,7 +1830,7 @@ docker_app_deploy() {
                 break
                 ;;
             *)
-                echo -e "${gl_hong}❌ 功能开发中，敬请期待${gl_bai}"
+                echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
                 ;;
         esac
         break_end
