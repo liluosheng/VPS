@@ -1727,7 +1727,7 @@ docker_menu() {
 install_ldnmp() {
     root_use
     install_dependency
-    check_disk_space 50
+    check_disk_space 5
     install_docker
 
     echo -e "${gl_huang}正在部署LDNMP环境...${gl_bai}"
