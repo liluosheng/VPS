@@ -1438,13 +1438,39 @@ docker_ps() {
     done
 }
 
-# Docker Compose 管理
+# ============== 新增：Docker Compose 管理函数 ==============
 docker_compose() {
-    install docker-compose
+    # 子函数：安装docker-compose（自动检查并安装）
+    install_docker_compose() {
+        if ! command -v docker-compose &>/dev/null; then
+            echo -e "${gl_huang}检测到未安装docker-compose，正在安装...${gl_bai}"
+            # 下载最新版（使用代理加速）
+            local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
+            local proxy_url="https://ghproxy.com/$compose_url"
+            
+            # 尝试直接下载，失败则用代理
+            if ! sudo curl -L --connect-timeout 10 "$compose_url" -o /usr/local/bin/docker-compose; then
+                echo -e "${gl_hong}直接下载失败，尝试代理...${gl_bai}"
+                if ! sudo curl -L --connect-timeout 10 "$proxy_url" -o /usr/local/bin/docker-compose; then
+                    echo -e "${gl_hong}❌ docker-compose安装失败，请手动安装后重试${gl_bai}"
+                    return 1
+                fi
+            fi
+            
+            # 赋予执行权限
+            sudo chmod +x /usr/local/bin/docker-compose
+            echo -e "${gl_lv}✅ docker-compose安装完成${gl_bai}"
+        fi
+        return 0
+    }
+
+    # 先确保docker-compose已安装
+    install_docker_compose || return 1
+
     while true; do
         clear
         echo -e "${gl_XLtool}====== Docker Compose 管理 ======${gl_bai}"
-        send_stats "进入Docker Compose管理"
+        send_stats "进入Docker Compose管理"  # 原有统计功能
         echo "1. 新建Compose项目（创建docker-compose.yml）"
         echo "2. 启动当前目录Compose项目（up -d）"
         echo "3. 停止当前目录Compose项目（down）"
@@ -1460,61 +1486,69 @@ docker_compose() {
             1)
                 send_stats "新建Docker Compose项目"
                 read -e -p "请输入项目名称（用于创建目录）: " proj_name
-                mkdir -p "$proj_name" && cd "$proj_name"
-                echo -e "${gl_huang}正在创建基础docker-compose.yml...${gl_bai}"
+                # 创建项目目录并进入
+                if ! mkdir -p "$proj_name" || ! cd "$proj_name"; then
+                    echo -e "${gl_hong}❌ 项目目录创建失败${gl_bai}"
+                    break
+                fi
+                # 生成基础docker-compose.yml（Nginx示例）
+                echo -e "${gl_huang}正在创建基础配置文件...${gl_bai}"
                 cat > docker-compose.yml << 'EOF'
 version: '3'
 services:
-  # 示例：Nginx服务
-  nginx:
-    image: nginx:latest
-    container_name: my-nginx
+  web:
+    image: nginx:alpine
     ports:
-      - "80:80"
+      - "8080:80"  # 主机端口:容器端口
     volumes:
-      - ./nginx/conf:/etc/nginx/conf.d
-      - ./nginx/html:/usr/share/nginx/html
-    restart: always
+      - ./html:/usr/share/nginx/html  # 静态文件目录映射
+      - ./nginx/conf.d:/etc/nginx/conf.d  # 配置文件映射
+    restart: always  # 自动重启
 EOF
-                echo -e "${gl_lv}已在 $(pwd)/docker-compose.yml 创建基础配置${gl_bai}"
-                echo "可使用 nano docker-compose.yml 编辑配置"
-                cd ..
+                # 创建配套目录
+                mkdir -p html nginx/conf.d
+                echo "<h1>Compose Project: $proj_name</h1>" > html/index.html
+                echo -e "${gl_lv}✅ 项目创建完成，路径：$(pwd)${gl_bai}"
+                echo "提示：可编辑 docker-compose.yml 扩展更多服务（如MySQL、PHP等）"
                 ;;
             2)
                 send_stats "启动Docker Compose项目"
                 if [ -f "docker-compose.yml" ]; then
                     sudo docker-compose up -d
-                    echo -e "${gl_lv}Compose项目已启动${gl_bai}"
+                    echo -e "${gl_lv}✅ 项目已启动（后台运行）${gl_bai}"
                 else
-                    echo -e "${gl_hong}当前目录未找到 docker-compose.yml${gl_bai}"
+                    echo -e "${gl_hong}❌ 当前目录未找到 docker-compose.yml${gl_bai}"
                 fi
                 ;;
             3)
                 send_stats "停止Docker Compose项目"
                 if [ -f "docker-compose.yml" ]; then
                     sudo docker-compose down
-                    echo -e "${gl_lv}Compose项目已停止${gl_bai}"
+                    echo -e "${gl_lv}✅ 项目已停止（容器已删除）${gl_bai}"
                 else
-                    echo -e "${gl_hong}当前目录未找到 docker-compose.yml${gl_bai}"
+                    echo -e "${gl_hong}❌ 当前目录未找到 docker-compose.yml${gl_bai}"
                 fi
                 ;;
             4)
                 send_stats "重启Docker Compose项目"
                 if [ -f "docker-compose.yml" ]; then
                     sudo docker-compose restart
-                    echo -e "${gl_lv}Compose项目已重启${gl_bai}"
+                    echo -e "${gl_lv}✅ 项目已重启${gl_bai}"
                 else
-                    echo -e "${gl_hong}当前目录未找到 docker-compose.yml${gl_bai}"
+                    echo -e "${gl_hong}❌ 当前目录未找到 docker-compose.yml${gl_bai}"
                 fi
                 ;;
             5)
                 send_stats "查看Docker Compose日志"
                 if [ -f "docker-compose.yml" ]; then
-                    read -e -p "显示行数(默认100): " lines
-                    lines=${lines:-100}
-                    sudo docker-compose logs --tail $lines
+                    read -e -p "是否实时查看日志？(Y/N，默认N): " live_log
+                    if [ "$live_log" = "Y" ] || [ "$live_log" = "y" ]; then
+                        sudo docker-compose logs -f  # 实时日志（按Ctrl+C退出）
+                    else
+                        sudo docker-compose logs --tail=100  # 显示最后100行
+                    fi
                 else
-                    echo -e "${gl_hong}当前目录未找到 docker-compose.yml${gl_bai}"
+                    echo -e "${gl_hong}❌ 当前目录未找到 docker-compose.yml${gl_bai}"
                 fi
                 ;;
             6)
@@ -1522,19 +1556,21 @@ EOF
                 if [ -f "docker-compose.yml" ]; then
                     sudo docker-compose ps
                 else
-                    echo -e "${gl_hong}当前目录未找到 docker-compose.yml${gl_bai}"
+                    echo -e "${gl_hong}❌ 当前目录未找到 docker-compose.yml${gl_bai}"
                 fi
                 ;;
             0)
-                break
+                break  # 返回主菜单
                 ;;
             *)
                 echo -e "${gl_hong}❌ 无效选择，请重新输入${gl_bai}"
                 ;;
         esac
-        break_end
+        break_end  # 暂停查看结果（原有预设函数）
     done
 }
+
+
 
 # Docker 应用快速部署（预设常用应用）
 docker_app_deploy() {
@@ -3141,16 +3177,16 @@ system_tools() {
 }
 
 
-# ============== 脚本主菜单 ==============
+# ============== 主菜单函数 ==============
 XLtool() {
     clear
-    CheckFirstRun_false  # 检查许可协议（预设函数）
-    local sh_v="1.0.0"  # 脚本版本（示例）
-    local gh_proxy="https://ghproxy.com/"  # GitHub代理（加速更新）
+    CheckFirstRun_false  # 检查许可协议（原有预设函数）
+    local sh_v="1.0.1"  # 版本号更新（新增功能）
+    local gh_proxy="https://gh-proxy.com/"  # GitHub代理（保持原有）
 
     while true; do
         clear
-        # 显示脚本头部信息
+        # 头部信息
         echo -e "${gl_XLtool}########################################################${gl_bai}"
         echo -e "${gl_XLtool}#                                                      #${gl_bai}"
         echo -e "${gl_XLtool}#               XLtool 服务器管理工具箱 v$sh_v               #${gl_bai}"
@@ -3158,67 +3194,73 @@ XLtool() {
         echo -e "${gl_XLtool}#                                                      #${gl_bai}"
         echo -e "${gl_XLtool}########################################################${gl_bai}"
 
-        # 显示主菜单选项
+        # 主菜单选项（新增Docker Compose管理）
         echo -e "\n${gl_XLtool}【容器与环境管理】${gl_bai}"
         echo "1. Docker 管理中心（安装/容器/镜像/应用部署）"
         echo "2. LDNMP 环境管理（Nginx+PHP+MySQL）"
+        echo "3. Docker Compose 管理（项目创建/启动/监控）"  # 新增选项
+
         echo -e "\n${gl_XLtool}【网站与安全】${gl_bai}"
-        echo "3. 站点管理（创建/配置/反向代理）"
-        echo "4. SSL 证书管理（申请/部署/续期）"
-        echo "5. Fail2ban 防暴力破解"
+        echo "4. 站点管理（创建/配置/反向代理）"  # 原3→4
+        echo "5. SSL 证书管理（申请/部署/续期）"  # 原4→5
+        echo "6. Fail2ban 防暴力破解"  # 原5→6
+
         echo -e "\n${gl_XLtool}【系统与监控】${gl_bai}"
-        echo "6. 服务器监控与信息"
-        echo "7. 系统工具（更新/源/防火墙/Swap等）"
+        echo "7. 服务器监控与信息"  # 原6→7
+        echo "8. 系统工具（更新/源/防火墙/Swap等）"  # 原7→8
+
         echo -e "\n${gl_XLtool}【其他】${gl_bai}"
-        echo "8. 脚本更新"
-        echo "9. 隐私设置（关闭统计）"
+        echo "9. 脚本更新"  # 原8→9
+        echo "10. 隐私设置（关闭统计）"  # 原9→10
+
         echo -e "\n${gl_XLtool}0. 退出脚本${gl_bai}"
         echo -e "\n${gl_XLtool}########################################################${gl_bai}"
 
-        # 处理用户选择
-        read -e -p "请输入你的选择 [0-9]: " choice
+        # 处理用户选择（同步调整编号）
+        read -e -p "请输入你的选择 [0-10]: " choice
         case $choice in
             1)
-                docker_menu  # Docker管理（预设函数）
+                docker_menu  # Docker管理（原有函数）
                 ;;
             2)
-                ldnmp_menu  # LDNMP管理（预设函数）
+                ldnmp_menu  # LDNMP管理（原有函数）
                 ;;
             3)
-                site_menu  # 站点管理（当前模块）
+                docker_compose  # 新增：调用Docker Compose管理
                 ;;
             4)
-                ssl_menu  # SSL管理（预设函数）
+                site_menu  # 站点管理（原3→4）
                 ;;
             5)
-                fail2ban_menu  # Fail2ban管理（当前模块）
+                ssl_menu  # SSL管理（原4→5）
                 ;;
             6)
-                monitor_menu  # 服务器监控（当前模块）
+                fail2ban_menu  # Fail2ban管理（原5→6）
                 ;;
             7)
-                system_tools  # 系统工具（当前模块）
+                monitor_menu  # 服务器监控（原6→7）
                 ;;
             8)
-                # 脚本更新（从GitHub拉取最新版本）
+                system_tools  # 系统工具（原7→8）
+                ;;
+            9)
+                # 脚本更新（原8→9，保持原有逻辑）
                 echo -e "${gl_huang}正在检查更新...${gl_bai}"
                 local update_url="https://raw.githubusercontent.com/kejilion/XLtool/main/XLtool.sh"
                 local proxy_url="$gh_proxy$update_url"
-                # 尝试直接下载/代理下载
+                # 尝试下载最新版本
                 curl -sSL --connect-timeout 10 "$update_url" -o /tmp/XLtool_new.sh
                 if [ $? -ne 0 ]; then
                     echo -e "${gl_hong}更新失败，尝试使用代理...${gl_bai}"
                     curl -sSL --connect-timeout 10 "$proxy_url" -o /tmp/XLtool_new.sh
                 fi
-                # 检查更新文件是否存在
+                # 检查更新
                 if [ -f "/tmp/XLtool_new.sh" ]; then
                     chmod +x /tmp/XLtool_new.sh
-                    # 对比版本（假设新版本通过grep提取）
                     local new_version=$(grep 'sh_v="' /tmp/XLtool_new.sh | cut -d'"' -f2)
                     if [ "$new_version" != "$sh_v" ]; then
                         read -e -p "发现新版本 v$new_version，是否更新？(Y/N): " confirm
                         if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
-                            # 覆盖旧版本（安装路径：用户目录+系统目录）
                             cp -f /tmp/XLtool_new.sh ~/XLtool.sh
                             cp -f /tmp/XLtool_new.sh /usr/local/bin/k 2>/dev/null
                             chmod +x ~/XLtool.sh /usr/local/bin/k 2>/dev/null
@@ -3229,16 +3271,16 @@ XLtool() {
                     else
                         echo -e "${gl_lv}当前已是最新版本 v$sh_v${gl_bai}"
                     fi
-                    rm -f /tmp/XLtool_new.sh  # 清理临时文件
+                    rm -f /tmp/XLtool_new.sh
                 else
                     echo -e "${gl_hong}更新失败，无法获取新版本${gl_bai}"
                 fi
                 ;;
-            9)
-                # 隐私设置（关闭统计）
+            10)
+                # 隐私设置（原9→10，保持原有逻辑）
                 read -e -p "确定要关闭使用统计吗？(Y/N): " confirm
                 if [ "$confirm" = "Y" ] || [ "$confirm" = "y" ]; then
-                    yinsiyuanquan2  # 关闭统计（预设函数）
+                    yinsiyuanquan2  # 关闭统计（原有函数）
                     echo -e "${gl_lv}已关闭使用统计${gl_bai}"
                     send_stats "关闭使用统计"
                 else
@@ -3252,14 +3294,14 @@ XLtool() {
                 exit 0
                 ;;
             *)
-                echo -e "${gl_hong}❌ 无效选择，请输入 0-9 之间的数字${gl_bai}"
+                echo -e "${gl_hong}❌ 无效选择，请输入 0-10 之间的数字${gl_bai}"
                 ;;
         esac
-        break_end  # 暂停查看结果
+        break_end  # 暂停查看结果（原有预设函数）
     done
 }
 
 
 # ============== 脚本初始化 ==============
-root_use  # 检查root权限（必须root执行）
+root_use  # 检查root权限（必须root执行，原有函数）
 XLtool    # 启动主菜单
